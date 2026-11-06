@@ -51,7 +51,11 @@
   <button id="btn-cerrar">Cerrar y regresar a la app</button>
   <div id="estado"></div>
   <div id="diag"></div>
-  <div class="version">Página de compartir T'HÓ · v1</div>
+  <div id="prueba" style="display:none">
+    <button class="principal" id="btn-prueba-archivo">🧪 Probar compartir un archivo</button>
+    <button id="btn-prueba-texto">🧪 Probar compartir solo texto</button>
+  </div>
+  <div class="version">Página de compartir T'HÓ · v2</div>
 
 <script>
 (function () {
@@ -87,6 +91,34 @@
     btnCompartir.style.display = "none";
     document.getElementById("btn-cerrar").style.display = "none";
     diagEl.textContent = diag(null);
+    // v2: botones de prueba para saber si este navegador puede compartir DE
+    // VERDAD en esta página abierta sola (sin la app de por medio).
+    document.getElementById("prueba").style.display = "block";
+    function resultado(texto, f) {
+      estado.textContent = texto;
+      diagEl.textContent = diag(f);
+    }
+    document.getElementById("btn-prueba-archivo").onclick = function () {
+      var f;
+      try { f = new File(["Prueba de compartir de T'HÓ"], "prueba-tho.txt", { type: "text/plain" }); }
+      catch (e) { resultado("No se pudo crear el archivo de prueba (" + e.message + ").", null); return; }
+      if (!navigator.share) { resultado("Este navegador no tiene la función de compartir.", f); return; }
+      navigator.share({ files: [f] }).then(function () {
+        resultado("✅ PRUEBA DE ARCHIVO: sí se abrió el panel de compartir.", f);
+      }).catch(function (e) {
+        if (e && e.name === "AbortError") { resultado("✅ PRUEBA DE ARCHIVO: sí se abrió el panel (lo cerraste sin elegir).", f); return; }
+        resultado("❌ PRUEBA DE ARCHIVO: falló (" + (e && e.name) + ": " + (e && e.message) + ").", f);
+      });
+    };
+    document.getElementById("btn-prueba-texto").onclick = function () {
+      if (!navigator.share) { resultado("Este navegador no tiene la función de compartir.", null); return; }
+      navigator.share({ text: "Prueba de compartir de T'HÓ" }).then(function () {
+        resultado("✅ PRUEBA DE TEXTO: sí se abrió el panel de compartir.", null);
+      }).catch(function (e) {
+        if (e && e.name === "AbortError") { resultado("✅ PRUEBA DE TEXTO: sí se abrió el panel (lo cerraste sin elegir).", null); return; }
+        resultado("❌ PRUEBA DE TEXTO: falló (" + (e && e.name) + ": " + (e && e.message) + ").", null);
+      });
+    };
     return;
   }
 
