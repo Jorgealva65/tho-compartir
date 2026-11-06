@@ -55,7 +55,7 @@
     <button class="principal" id="btn-prueba-archivo">🧪 Probar compartir un archivo</button>
     <button id="btn-prueba-texto">🧪 Probar compartir solo texto</button>
   </div>
-  <div class="version">Página de compartir T'HÓ · v2</div>
+  <div class="version">Página de compartir T'HÓ · v3</div>
 
 <script>
 (function () {
@@ -84,8 +84,47 @@
     return "Detalle técnico (mándaselo a Claude): " + p.join(" · ");
   }
 
+  // v3: el PDF también puede llegar DENTRO de la dirección (después del #),
+  // sin que la app sea la "ventana madre" de esta pestaña. Motivo (pruebas
+  // en la tablet, 5 nov 2026): si la app abre esta página como ventana hija,
+  // Samsung Internet le pasa las restricciones del marco de Google y
+  // compartir falla con "Permission denied"; abierta por el usuario, sí
+  // comparte. Formato: #tho1&m=<nueva|misma>&n=<nombre>&d=<pdf en base64url>.
+  // Lo que va después del # nunca se manda a ningún servidor.
+  var modoHash = null;
+  (function leerPdfDeLaDireccion() {
+    var h = location.hash || "";
+    if (h.indexOf("#tho1&") !== 0) return;
+    var params = {};
+    h.slice(6).split("&").forEach(function (kv) {
+      var i = kv.indexOf("=");
+      if (i > 0) params[kv.slice(0, i)] = kv.slice(i + 1);
+    });
+    modoHash = params.m || "nueva";
+    // Quitar el PDF de la dirección (y del historial) en cuanto se lee.
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+    try {
+      var nombre = decodeURIComponent(params.n || "documento.pdf");
+      var b64 = (params.d || "").split("-").join("+").split("_").join("/");
+      while (b64.length % 4) b64 += "=";
+      var bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      archivo = new File([bytes], nombre, { type: "application/pdf" });
+      titulo.textContent = "✅ Tu PDF está listo";
+      nombreEl.textContent = nombre;
+      btnCompartir.disabled = false;
+    } catch (e) {
+      titulo.textContent = "No se pudo leer el PDF";
+      estado.textContent = "(" + e.message + ") Regresa a la app y vuelve a intentarlo.";
+      diagEl.textContent = diag(null);
+    }
+  })();
+  if (modoHash === "misma") {
+    document.getElementById("btn-cerrar").textContent = "Regresar a la app";
+  }
+
   // Abierta sola, sin la app: solo explicar.
-  if (!window.opener) {
+  if (!window.opener && !modoHash) {
     titulo.textContent = "Página de compartir de T'HÓ";
     nombreEl.textContent = "Esta página la usa la app T'HÓ para mandar PDFs por WhatsApp. Abierta sola no hace nada — si la estás viendo, la publicación funcionó.";
     btnCompartir.style.display = "none";
@@ -139,10 +178,10 @@
     estado.textContent = "";
   });
 
-  // Avisarle a la app que ya puede mandar el PDF. Se repite unas veces por si
-  // la app todavía no estaba escuchando.
+  // Avisarle a la app que ya puede mandar el PDF (solo en el modo viejo, con
+  // la app como ventana madre). Se repite unas veces por si no escuchaba aún.
   var intentos = 0;
-  var aviso = setInterval(function () {
+  var aviso = modoHash ? null : setInterval(function () {
     if (archivo || intentos >= 10) {
       clearInterval(aviso);
       if (!archivo) {
@@ -176,6 +215,7 @@
   };
 
   document.getElementById("btn-cerrar").onclick = function () {
+    if (modoHash === "misma") { history.back(); return; }
     window.close();
     setTimeout(function () {
       estado.textContent = "Si esta pestaña no se cerró sola, ciérrala y regresa a la pestaña de la app.";
