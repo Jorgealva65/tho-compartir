@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>T'HÓ — Compartir PDF</title>
+<!--
+  Página de compartir de T'HÓ (publicada en GitHub Pages).
+
+  Para qué existe: en Android, Google no deja que la app (que vive dentro de
+  los marcos de Apps Script) use el panel de "Compartir" -- ni siquiera desde
+  una pestaña que la propia app abra en blanco, porque esa pestaña hereda la
+  restricción. Esta página NO es de Google, así que no la hereda.
+
+  Cómo funciona:
+   1. La app abre esta página en una pestaña nueva.
+   2. Esta página le avisa a la app "ya estoy lista" (postMessage).
+   3. La app le pasa el PDF directamente, dentro del mismo dispositivo
+      (no se sube a ningún servidor; esta página no guarda nada).
+   4. Al tocar "Compartir" se abre el panel de Android (WhatsApp, etc.).
+
+  Esta página no contiene datos de T'HÓ. Si se abre sola (sin la app), solo
+  muestra un mensaje explicando para qué sirve.
+-->
+<style>
+  :root { color-scheme: light; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #f9f9f7; color: #2b2b29;
+    margin: 0; padding: 28px 20px; text-align: center;
+  }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .nombre { font-size: 13px; color: #6b6a64; margin: 0 0 22px; word-break: break-word; }
+  button {
+    display: block; width: 100%; max-width: 380px; margin: 12px auto; padding: 15px;
+    font-size: 17px; font-weight: 700; border-radius: 12px;
+    border: 1px solid #d1638f; background: #fff; color: #d1638f;
+  }
+  button.principal { background: #d1638f; color: #fff; border: none; }
+  button:disabled { opacity: .45; }
+  #estado { font-size: 14px; color: #3a3a38; margin: 18px auto 0; max-width: 420px; word-break: break-word; }
+  #diag { font-size: 11px; color: #8a8880; margin: 14px auto 0; max-width: 420px; word-break: break-word; }
+  .version { font-size: 10px; color: #b5b3ab; margin-top: 28px; }
+</style>
+</head>
+<body>
+  <h1 id="titulo">⏳ Recibiendo tu PDF…</h1>
+  <p class="nombre" id="nombre"></p>
+  <button class="principal" id="btn-compartir" disabled>📤 Compartir</button>
+  <button id="btn-cerrar">Cerrar y regresar a la app</button>
+  <div id="estado"></div>
+  <div id="diag"></div>
+  <div class="version">Página de compartir T'HÓ · v1</div>
+
+<script>
+(function () {
+  var titulo = document.getElementById("titulo");
+  var nombreEl = document.getElementById("nombre");
+  var btnCompartir = document.getElementById("btn-compartir");
+  var estado = document.getElementById("estado");
+  var diagEl = document.getElementById("diag");
+  var archivo = null;
+
+  function diag(f) {
+    var p = [];
+    try { p.push("pestaña principal: " + (window.top === window ? "sí" : "no")); } catch (e) { p.push("pestaña principal: no"); }
+    p.push("origen: " + location.origin);
+    p.push("share: " + (typeof navigator.share === "function" ? "sí" : "no"));
+    p.push("canShare: " + (typeof navigator.canShare === "function" ? "sí" : "no"));
+    if (f) {
+      try { if (navigator.canShare) p.push("acepta PDF: " + (navigator.canShare({ files: [f] }) ? "sí" : "no")); }
+      catch (e) { p.push("acepta PDF: error"); }
+    }
+    var pol = document.permissionsPolicy || document.featurePolicy;
+    if (pol && pol.allowsFeature) {
+      try { p.push("permite compartir: " + (pol.allowsFeature("web-share") ? "sí" : "NO")); } catch (e) {}
+    }
+    p.push("navegador: " + navigator.userAgent);
+    return "Detalle técnico (mándaselo a Claude): " + p.join(" · ");
+  }
+
+  // Abierta sola, sin la app: solo explicar.
+  if (!window.opener) {
+    titulo.textContent = "Página de compartir de T'HÓ";
+    nombreEl.textContent = "Esta página la usa la app T'HÓ para mandar PDFs por WhatsApp. Abierta sola no hace nada — si la estás viendo, la publicación funcionó.";
+    btnCompartir.style.display = "none";
+    document.getElementById("btn-cerrar").style.display = "none";
+    diagEl.textContent = diag(null);
+    return;
+  }
+
+  window.addEventListener("message", function (ev) {
+    // Solo se acepta lo que mande la ventana que abrió esta pestaña (la app).
+    if (ev.source !== window.opener) return;
+    var d = ev.data;
+    if (!d || d.tipo !== "tho-pdf" || !d.bytes || !d.nombre) return;
+    try {
+      archivo = new File([d.bytes], d.nombre, { type: "application/pdf" });
+    } catch (e) {
+      estado.textContent = "No se pudo preparar el archivo (" + e.message + ").";
+      return;
+    }
+    titulo.textContent = "✅ Tu PDF está listo";
+    nombreEl.textContent = d.nombre;
+    btnCompartir.disabled = false;
+    estado.textContent = "";
+  });
+
+  // Avisarle a la app que ya puede mandar el PDF. Se repite unas veces por si
+  // la app todavía no estaba escuchando.
+  var intentos = 0;
+  var aviso = setInterval(function () {
+    if (archivo || intentos >= 10) {
+      clearInterval(aviso);
+      if (!archivo) {
+        titulo.textContent = "No llegó el PDF";
+        estado.textContent = "Cierra esta pestaña, regresa a la app y vuelve a intentarlo.";
+        diagEl.textContent = diag(null);
+      }
+      return;
+    }
+    intentos++;
+    try { window.opener.postMessage({ tipo: "tho-compartir-lista" }, "*"); } catch (e) {}
+  }, 500);
+
+  btnCompartir.onclick = function () {
+    estado.textContent = ""; diagEl.textContent = "";
+    if (!archivo) return;
+    var puede = false;
+    try { puede = !!(navigator.canShare && navigator.canShare({ files: [archivo] })); } catch (e) { puede = false; }
+    if (!puede) {
+      estado.textContent = "Este navegador no deja compartir archivos aquí.";
+      diagEl.textContent = diag(archivo);
+      return;
+    }
+    navigator.share({ files: [archivo] }).then(function () {
+      estado.textContent = "✅ Listo. Ya puedes cerrar esta pestaña.";
+    }).catch(function (e) {
+      if (e && e.name === "AbortError") return;
+      estado.textContent = "No se pudo compartir (" + (e && e.name) + ": " + (e && e.message) + ").";
+      diagEl.textContent = diag(archivo);
+    });
+  };
+
+  document.getElementById("btn-cerrar").onclick = function () {
+    window.close();
+    setTimeout(function () {
+      estado.textContent = "Si esta pestaña no se cerró sola, ciérrala y regresa a la pestaña de la app.";
+    }, 300);
+  };
+})();
+</script>
+</body>
+</html>
